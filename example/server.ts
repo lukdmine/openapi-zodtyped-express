@@ -17,7 +17,7 @@ const zDateISO = z.codec(z.iso.datetime(), z.date(), {
 })
 
 const zInNOut = {
-  date: zDateISO.nullable(),
+  date: zToArrayIfNot(zDateISO.nullable()),
   age: z.coerce.number().min(1).max(100),
 }
 
@@ -26,7 +26,10 @@ app.get(
   // TODO: rename to zApiHandler?
   apiDoc({
     query: zInNOut,
-    returns: z.object(zInNOut),
+    returns: z.object({
+      age: zInNOut.age,
+      date: z.any(),
+    }),
   })((req, res) => {
     console.log('req.query', req.query)
     res.transformSend({

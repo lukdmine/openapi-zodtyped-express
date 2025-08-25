@@ -181,6 +181,12 @@ export const getApiDocInstance =
         // ==== override casted (transformed) transformTypes into JS runtime objects ====
         if (headersValidator) req.headers = headersValidationRes.data as any
         if (paramsValidator) req.params = paramValidationRes.data as any
+        // make req.equery writable, express4 works good, bug express 5 is read only... fuck it...
+        Object.defineProperty(req, 'query', {
+          ...Object.getOwnPropertyDescriptor(req, 'query'),
+          value: req.query,
+          writable: true,
+        })
         if (queryValidator) req.query = queryValidationRes.data as any
         if (bodyValidator) req.body = bodyValidationRes.data as any
 
@@ -246,7 +252,9 @@ type ExpressRouterInternalStruct = {
 }
 
 type ExpressRouteHandlerInternalStruct = {
-  name: 'bound dispatch'
+  // express v5 => 'handle'
+  // express v4 => 'bound dispatch'
+  name: 'handle' | 'bound dispatch'
   route: {
     stack: {
       handle: (a?: symbol) => {
@@ -288,7 +296,7 @@ const resolveRouteHandlersAndExtractAPISchema = (
         routerFullPath,
         urlsMethodDocsPointer
       )
-    } else if (r.name === 'bound dispatch') {
+    } else if (r.name === 'handle' || r.name === 'bound dispatch') {
       // === final end routes ===
       r.route.stack.forEach(s => {
         // this check if route is annotated by openapi-typed-express-docs
@@ -365,7 +373,14 @@ export const initApiDocs = (
         },
       ],
       // schemes: ['https', 'http'],
-      paths: convertUrlsMethodsSchemaToOpenAPI(resolveRouteHandlersAndExtractAPISchema(expressApp._router)),
+      paths: convertUrlsMethodsSchemaToOpenAPI(
+        resolveRouteHandlersAndExtractAPISchema(
+          // express v5 => router
+          // express v4 => _router
+          // @ts-expect-error
+          expressApp.router || expressApp._router
+        )
+      ),
     },
     customOpenAPIType
   )

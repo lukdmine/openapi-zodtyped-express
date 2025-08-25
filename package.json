@@ -24,7 +24,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",
-    "@types/express": "^5.0.0",
     "@types/jest": "^29.5.5",
     "@types/node": "^14.14.41",
     "@types/supertest": "^6.0.3",
@@ -42,7 +41,8 @@
     "uuid": "^11.1.0"
   },
   "peerDependencies": {
-    "express": "^4.21.2",
+    "@types/express": "^5.0.3",
+    "express": ">=4.2.2 <6.0.0",
     "zod": "^4.1.1"
   },
   "keywords": [
