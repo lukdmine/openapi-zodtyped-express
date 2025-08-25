@@ -2,30 +2,24 @@ import type { NextFunction, Request, Response } from 'express'
 import { z } from 'zod'
 import { parseUrlFromExpressRegexp } from './expressRegExUrlParser'
 import { convertUrlsMethodsSchemaToOpenAPI, type UrlsMethodDocs } from './openAPIFromSchema'
-import {
-  Dualish,
-  DualRawShape,
-  getZodValidator,
-  MaterializeType,
-  MaterializeTypeShape,
-  normalizeZodError,
-} from './runtimeSchemaValidation'
 import { DeepPartial, deepMerge, mergePaths } from './utils'
+import { getZodValidator, normalizeZodError } from './zUtils'
 
 // symbol as a key is not sent via express down to the _routes
-export const __expressTypedHack_key__ = '__openapi-zod-typed-hack_key__'
-export const __expressOpenAPIHack__ = Symbol('__openapi-zod-typed-hack__')
+export const __openapiZodTypedHackKey__ = '__openapiZodTypedHackKey__'
+export const __openapiZodTypedHack__ = Symbol('__openapiZodTypedHack__')
+const _openapiZodTypedExpress__route_cache = '_openapiZodTypedExpress__route_cache'
 
 // --------------------------------------------------------------------------
 // ------------- express handlers runtime validation HOF wrapper ------------
 // --------------------------------------------------------------------------
 
 type Config = {
-  headers?: Dualish
-  params?: DualRawShape
-  query?: DualRawShape
-  body?: Dualish
-  returns?: Dualish
+  headers?: z.ZodTypeAny
+  params?: Record<string, z.ZodTypeAny>
+  query?: Record<string, z.ZodTypeAny>
+  body?: z.ZodTypeAny
+  returns?: z.ZodTypeAny
 }
 
 /**
@@ -73,29 +67,29 @@ type Config = {
 
 type Present<T> = Exclude<T, undefined>
 
-type BodyType<C extends Config> = [Present<C['body']>] extends [never]
-  ? unknown
-  : MaterializeType<Present<C['body']>, 'parse', 'output'>
+type HeadersType<C extends Config> = [Present<C['headers']>] extends [never]
+  ? {}
+  : { headers: z.output<Present<C['headers']>> }
 
 type ParamsType<C extends Config> = [Present<C['params']>] extends [never]
   ? Record<string, never>
-  : MaterializeTypeShape<Present<C['params']>, 'parse', 'output'>
+  : z.output<z.ZodObject<Present<C['params']>>>
 
 type QueryType<C extends Config> = [Present<C['query']>] extends [never]
   ? Record<string, never>
-  : MaterializeTypeShape<Present<C['query']>, 'parse', 'output'>
+  : z.output<z.ZodObject<Present<C['query']>>>
 
-type HeadersType<C extends Config> = [Present<C['headers']>] extends [never]
-  ? {}
-  : { headers: MaterializeType<Present<C['headers']>, 'parse', 'output'> }
+type BodyType<C extends Config> = [Present<C['body']>] extends [never]
+  ? unknown
+  : z.output<Present<C['body']>>
 
 type ReturnsType<C extends Config> = [Present<C['returns']>] extends [never]
   ? unknown
-  : MaterializeType<Present<C['returns']>, 'serialize', 'output'>
+  : z.input<Present<C['returns']>>
 
 type ReturnsTransformType<C extends Config> = [Present<C['returns']>] extends [never]
   ? unknown
-  : MaterializeType<Present<C['returns']>, 'serialize', 'input'>
+  : z.output<Present<C['returns']>>
 
 type TypedHandleDual<C extends Config> = (
   req: Omit<Request<ParamsType<C>, any, BodyType<C>, QueryType<C>>, 'headers'> & HeadersType<C>,
@@ -124,11 +118,11 @@ export const getApiDocInstance =
     handle: TypedHandleDual<C>
   ) => {
     // --- this function is called only for initialization of handlers ---
-    const headersSchema = docs.headers ? docs.headers : null
+    const headersSchema = docs.headers
     const paramsSchema = docs.params ? z.object(docs.params) : null
     const querySchema = docs.query ? z.object(docs.query) : null
-    const bodySchema = docs.body ? docs.body : null
-    const returnsSchema = docs.returns ? docs.returns : null
+    const bodySchema = docs.body
+    const returnsSchema = docs.returns
 
     const headersValidator = getZodValidator(headersSchema, { transformTypeMode: 'parse' })
     const paramsValidator = getZodValidator(paramsSchema, { transformTypeMode: 'parse' })
@@ -142,7 +136,7 @@ export const getApiDocInstance =
       // if someone forgets to call `initApiDocs()` before server starts to listen
       // each HTTP call to apiDocs()() decorated handler should fail
       // because this fn is synchronous express should return nicely stringified error
-      if (message !== __expressOpenAPIHack__) {
+      if (message !== __openapiZodTypedHack__) {
         throw new Error('You probably forget to call `initApiDocs()` for typed-express library')
       }
 
@@ -187,6 +181,12 @@ export const getApiDocInstance =
         // ==== override casted (transformed) transformTypes into JS runtime objects ====
         if (headersValidator) req.headers = headersValidationRes.data as any
         if (paramsValidator) req.params = paramValidationRes.data as any
+        // make req.equery writable, express4 works good, bug express 5 is read only... fuck it...
+        Object.defineProperty(req, 'query', {
+          ...Object.getOwnPropertyDescriptor(req, 'query'),
+          value: req.query,
+          writable: true,
+        })
         if (queryValidator) req.query = queryValidationRes.data as any
         if (bodyValidator) req.body = bodyValidationRes.data as any
 
@@ -225,7 +225,7 @@ export const getApiDocInstance =
     }
 
     // make the sign for the function metadata to be sure that resolver is enhanced by this library
-    lazyInitializeHandler[__expressTypedHack_key__] = __expressOpenAPIHack__
+    lazyInitializeHandler[__openapiZodTypedHackKey__] = __openapiZodTypedHack__
 
     return lazyInitializeHandler as any
   }
@@ -252,7 +252,9 @@ type ExpressRouterInternalStruct = {
 }
 
 type ExpressRouteHandlerInternalStruct = {
-  name: 'bound dispatch'
+  // express v5 => 'handle'
+  // express v4 => 'bound dispatch'
+  name: 'handle' | 'bound dispatch'
   route: {
     stack: {
       handle: (a?: symbol) => {
@@ -266,7 +268,7 @@ type ExpressRouteHandlerInternalStruct = {
       }
       method: string
       // custom attribute for caching docs with multiple routes instances
-      _swaggerTypedExpressDocs__route_cache?: any
+      _openapiZodTypedExpress__route_cache?: any
     }[]
     path: string
   }
@@ -294,16 +296,17 @@ const resolveRouteHandlersAndExtractAPISchema = (
         routerFullPath,
         urlsMethodDocsPointer
       )
-    } else if (r.name === 'bound dispatch') {
+    } else if (r.name === 'handle' || r.name === 'bound dispatch') {
       // === final end routes ===
       r.route.stack.forEach(s => {
         // this check if route is annotated by openapi-typed-express-docs
         const shouldInitTypedRoute =
-          // @ts-expect-error stored meta attributes of the function
-          s.handle?.[__expressTypedHack_key__] === __expressOpenAPIHack__
+          // biome-ignore lint/suspicious/noTsIgnore: <explanation>
+          // @ts-ignore stored meta attributes of the function
+          s.handle?.[__openapiZodTypedHackKey__] === __openapiZodTypedHack__
 
         // this is used for multiple instances of the same express Router via multiple app.use('/xxx', router)
-        const isInitTypedRoute = s._swaggerTypedExpressDocs__route_cache !== undefined
+        const isInitTypedRoute = s[_openapiZodTypedExpress__route_cache] !== undefined
 
         // typed route === route wrapped by apiDoc() high order function
         if (shouldInitTypedRoute === false && isInitTypedRoute === false) return
@@ -312,12 +315,12 @@ const resolveRouteHandlersAndExtractAPISchema = (
 
         // each route needs to be initialized, but if we apply one route for multiple places via app.use() we need to persist api data
         let routeMetadataDocs: any
-        if (s._swaggerTypedExpressDocs__route_cache) {
-          routeMetadataDocs = s._swaggerTypedExpressDocs__route_cache
+        if (s[_openapiZodTypedExpress__route_cache]) {
+          routeMetadataDocs = s[_openapiZodTypedExpress__route_cache]
         } else {
-          routeMetadataDocs = s.handle(__expressOpenAPIHack__)
+          routeMetadataDocs = s.handle(__openapiZodTypedHack__)
           s.handle = routeMetadataDocs.handle
-          s._swaggerTypedExpressDocs__route_cache = routeMetadataDocs
+          s[_openapiZodTypedExpress__route_cache] = routeMetadataDocs
         }
 
         if (!urlsMethodDocsPointer[endpointPath]) {
@@ -370,7 +373,14 @@ export const initApiDocs = (
         },
       ],
       // schemes: ['https', 'http'],
-      paths: convertUrlsMethodsSchemaToOpenAPI(resolveRouteHandlersAndExtractAPISchema(expressApp._router)),
+      paths: convertUrlsMethodsSchemaToOpenAPI(
+        resolveRouteHandlersAndExtractAPISchema(
+          // express v5 => router
+          // express v4 => _router
+          // @ts-expect-error
+          expressApp.router || expressApp._router
+        )
+      ),
     },
     customOpenAPIType
   )

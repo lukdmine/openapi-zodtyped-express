@@ -20,13 +20,11 @@
     "resolveJsonModule": true,
     "isolatedModules": false,
     "emitDecoratorMetadata": true,
-    "strictPropertyInitialization": false,
     "experimentalDecorators": true,
     "esModuleInterop": true,
-    "noImplicitReturns": true,
-    "noImplicitThis": true,
-    "strictNullChecks": true,
-    "noImplicitAny": true,
+    "noImplicitReturns": false,
+    "noImplicitThis": false,
+    "noImplicitAny": false,
     "noUnusedParameters": false,
     "noUnusedLocals": false,
 
@@ -35,15 +33,9 @@
     "sourceMap": false,
     "outDir": "dist",
     "noEmit": false,
-    "declaration": true
+    "declaration": true,
+    "strictNullChecks": true, // ensure strict null checks for nullable, undefined, and ?
+    "strictPropertyInitialization": true // ensure properties with ? or possibly undefined/null are checked
   },
-  "include": [
-    // we have to change path when we build lib and when we test lib in the /example directory...
-    // TODO: resolve it somehow
-    "src/**/*"
-    // tests and example should not be included in dist, but we want to check the types while
-    // developing the library
-    // "tests/**/*",
-    // "example/**/*",
-  ]
+  "include": ["src/**/*"]
 }
